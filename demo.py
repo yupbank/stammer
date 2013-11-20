@@ -11,8 +11,8 @@ Created on
 from stammer import cut
 
 def main():
-    for word in cut('We are in New York, we love New Year.'):
-        print word
+    for word in cut('we and anyone else Happy New Year and New York Jesus, Happy New Year, which is better than now'):
+        print '|term|', word
 
 if __name__ == '__main__':
     main()

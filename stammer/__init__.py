@@ -23,16 +23,18 @@ import threading
 from functools import wraps
 import logging
 import time
+from collections import defaultdict
 
 import finalseg
+
 
 DICTIONARY = "dict.txt"
 DICT_LOCK = threading.RLock()
 TRIE = None # to be initialized
 FREQ = {}
 MIN_FREQ = 0.0
-TOTAL =0.0
-user_word_tag_tab={}
+TOTAL = 0.0
+user_word_tag_tab = {}
 INITIALIZED = False
 
 
@@ -46,11 +48,20 @@ def setLogLevel(log_level):
     logger.setLevel(log_level)
 
 
+def build_trie(atree):
+    def _(words):
+        pointer = atree
+        for word in words:
+            if word not in pointer:
+                pointer[word] = {}
+            pointer = pointer[word]
+        pointer[''] = '' #end tag
+    return _
+
 def gen_trie(f_name):
-    lfreq = {}
-    trie = {}
-    ltotal = 0.0
-    with open(f_name, 'rb') as f:
+    lfreq, trie, ltotal = {}, {}, 0.0
+    tree_building = build_trie(trie)
+    with open(f_name, 'r') as f:
         for lineno, line in enumerate(f):
             line = line.strip()
             try:
@@ -58,75 +69,72 @@ def gen_trie(f_name):
                 freq = float(freq)
                 lfreq[words] = freq
                 ltotal = ltotal + freq
-                p = trie
                 words = words.split()
-                for c in words:
-                    if c not in p:
-                        p[c] ={}
-                    p = p[c]
-                p['']='' #ending flag
+                tree_building(words)
             except ValueError, e:
                 logger.debug('%s at line %s %s' % (f_name,  lineno, line))
                 raise ValueError, e
+
     lfreq = dict([(k,log(float(v)/ltotal)) for k,v in lfreq.iteritems()]) #normalize
     return trie, lfreq, ltotal
 
 
 def initialize(*args):
     global TRIE, FREQ, TOTAL, INITIALIZED
-    _curpath=os.path.normpath( os.path.join(os.getcwd(), os.path.dirname(__file__)))
+    _curpath = os.path.normpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
     abs_path = os.path.join(_curpath, DICTIONARY)
     TRIE, FREQ, TOTAL = gen_trie(abs_path)
     MIN_FREQ = min(FREQ.itervalues())
     INITIALIZED = True
 
 
-def require_initialized(fn):
-    @wraps(fn)
-    def wrapped(*args, **kwargs):
-        if INITIALIZED:
+def require_initialize(signal=INITIALIZED, init=initialize, args=(DICTIONARY,)):
+    def _(fn):
+        @wraps(fn)
+        def __(*args, **kwargs):
+            if not signal:
+                init(*args)
             return fn(*args, **kwargs)
-        else:
-            initialize(DICTIONARY)
-            return fn(*args, **kwargs)
-
-    return wrapped
+        return __
+    return _
 
 
-@require_initialized
-def get_DAG(words):
+@require_initialize()
+def get_segment(words):
     N = len(words)
-    i, j=0, 0
-    p = TRIE
-    DAG = {}
-    while i<N:
-        c = words[j]
-        if c in p:
-            p = p[c]
-            if '' in p:
-                if i not in DAG:
-                    DAG[i]=[]
-                DAG[i].append(j)
-            j+=1
+    i, j = 0, 0
+    active_node = TRIE
+    segmentation = defaultdict(list)
+    while i < N:
+        word = words[j]
+        if word in active_node:
+            next_node = active_node[word]
+            active_node = next_node
+
+            if '' in active_node:
+                segmentation[i].append(j)
+
+            j = j+1
+
             if j >= N:
-                i += 1
+                i = i+1
                 j = i
-                p = TRIE
+                active_node = TRIE
         else:
-            p = TRIE
-            i += 1
+            active_node = TRIE
+            i = i+1
             j = i
 
     for i in xrange(N):
-        if i not in DAG:
-            DAG[i] =[i]
-    return DAG
+        if i not in segmentation:
+            segmentation[i].append(i)
+
+    return segmentation
 
 
 def __cut_DAG(words):
-    DAG = get_DAG(words)
-    route ={}
-    calc(words, DAG, 0, route=route)
+    segment = get_segment(words)
+    route = calc(words, segment)
     x = 0
     buf =u''
     N = len(words)
@@ -137,11 +145,12 @@ def __cut_DAG(words):
             buf = buf + ' '+ ' '.join(l_word)
         else:
             if len(buf)>0:
-                if len(buf)==1:
+                if len(buf.strip().split())==1:
                     yield buf
                     buf=u''
                 else:
-                    if (buf not in FREQ):
+                    if buf not in FREQ:
+                        print 'final cut:',buf, ''
                         regognized = finalseg.cut(buf)
                         for t in regognized:
                             yield t
@@ -150,6 +159,7 @@ def __cut_DAG(words):
                             yield elem
                     buf=u''
             yield ' '.join(l_word)        
+
         x = y
 
     if len(buf)>0:
@@ -157,6 +167,7 @@ def __cut_DAG(words):
             yield buf
         else:
             if (buf not in FREQ):
+                print 'final cut:',buf, ''
                 regognized = finalseg.cut(buf)
                 for t in regognized:
                     yield t
@@ -164,46 +175,24 @@ def __cut_DAG(words):
                 for elem in buf:
                     yield elem
 
-def calc(sentence, DAG, idx, route):
+def calc(sentence, DAG):
+    route = {}
     N = len(sentence)
-    route[N] = (0.0,'')
+    route[N] = (0.0, '')
     for idx in xrange(N-1,-1,-1):
-        candidates = [(FREQ.get(' '.join(sentence[idx:x+1]), MIN_FREQ) + route[x+1][0],x ) for x in DAG[idx] ]
+        candidates = [(FREQ.get(' '.join(sentence[idx:x+1]), MIN_FREQ) + route[x+1][0], x ) for x in DAG[idx] ]
         route[idx] = max(candidates)
+    return route
 
 
-#def __cut_DAG_NO_HMM(sentence):
-#    re_eng = re.compile(ur'[a-zA-Z0-9]',re.U)
-#    DAG = get_DAG(sentence)
-#    route ={}
-#    calc(sentence,DAG,0,route=route)
-#    x = 0
-#    N = len(sentence)
-#    buf = u''
-#    while x<N:
-#        y = route[x][1]+1
-#        l_word = sentence[x:y]
-#        if re_eng.match(l_word) and len(l_word)==1:
-#            buf += l_word
-#            x =y
-#        else:
-#            if len(buf)>0:
-#                yield buf
-#                buf = u''
-#            yield l_word        
-#            x =y
-#    if len(buf)>0:
-#        yield buf
-#        buf = u''
-
-
-def cut(sentence, HMM=True):
-    re_word, re_skip = re.compile(ur"([*(,|\n)]+)", re.U), re.compile(ur"(\r\n|\s)", re.U)
+def cut(sentence, cut_block=__cut_DAG):
+    re_word, re_skip = re.compile(ur"([.*(,|\n)]+)", re.U), re.compile(ur"(\r\n|\s)", re.U)
     blocks = re_word.split(sentence)
     
     cut_block = __cut_DAG
     
-    for blk in filter(lambda x: x, map(lambda x: x.strip(), blocks)):
+    for blk in filter(lambda x: x.strip(), blocks):
+        blk = blk.strip()
         if re.match(r'[(\w+)]+', blk):
             for word in cut_block(blk.split()):
                 if word.strip():
