@@ -15,14 +15,10 @@ __license__ = 'MIT'
 import re
 import os
 import sys
-import tempfile
-import marshal
 from math import log
-import random
 import threading
 from functools import wraps
 import logging
-import time
 from collections import defaultdict
 
 import finalseg
@@ -99,13 +95,13 @@ def require_initialize(signal=INITIALIZED, init=initialize, args=(DICTIONARY,)):
     return _
 
 
-def _travel_depth(words, trie):
+def _travel_depth(words, node):
     if not words:
         return 0
     if words[0] == '':
         return 1
-    elif words[0] in trie:
-        return 1+_travel_depth(words[1:], trie[words[0]])
+    elif words[0] in node:
+        return 1+_travel_depth(words[1:], node[words[0]])
     else:
         return 0
 
@@ -128,9 +124,10 @@ def handler_buf(buf):
         if len(buf.split()) == 1:
             yield buf
         else:
-            regognized = finalseg.cut(buf)
-            for t in regognized:
+            recognized = finalseg.cut(buf)
+            for t in recognized:
                 yield t
+
 
 def _cut(words):
     segment = _segment(words)
@@ -177,15 +174,16 @@ def cut(sentence, cut_block=_cut):
                 yield blk
 
 
-def _travel_depth(words, trie):
+def _travel_depth(words, node):
     if not words:
         return 0
     if words[0] == '':
         return 1
-    elif words[0] in trie:
-        return 1+_travel_depth(words[1:], trie[words[0]])
+    elif words[0] in node:
+        return 1+_travel_depth(words[1:], node[words[0]])
     else:
         return 0
+
 
 @require_initialize()
 def _segment(words):
