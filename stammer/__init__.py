@@ -99,81 +99,56 @@ def require_initialize(signal=INITIALIZED, init=initialize, args=(DICTIONARY,)):
     return _
 
 
+def _travel_depth(words, trie):
+    if not words:
+        return 0
+    if words[0] == '':
+        return 1
+    elif words[0] in trie:
+        return 1+_travel_depth(words[1:], trie[words[0]])
+    else:
+        return 0
+
+
 @require_initialize()
-def get_segment(words):
-    N = len(words)
-    i, j = 0, 0
-    active_node = TRIE
-    segmentation = defaultdict(list)
-    while i < N:
-        word = words[j]
-        if word in active_node:
-            next_node = active_node[word]
-            active_node = next_node
-
-            if '' in active_node:
-                segmentation[i].append(j)
-
-            j = j+1
-
-            if j >= N:
-                i = i+1
-                j = i
-                active_node = TRIE
+def _segment(words):
+    seg = defaultdict(list)
+    for no, word in enumerate(words):
+        s = _travel_depth(words[no:], TRIE)
+        if s > 0:
+            seg[no].append(s+no-1)
         else:
-            active_node = TRIE
-            i = i+1
-            j = i
-
-    for i in xrange(N):
-        if i not in segmentation:
-            segmentation[i].append(i)
-
-    return segmentation
+            seg[no].append(no)
+    return seg
 
 
-def __cut_DAG(words):
-    segment = get_segment(words)
-    route = calc(words, segment)
-    x = 0
-    buf =u''
-    N = len(words)
-    while x<N:
-        y = route[x][1]+1
-        l_word = words[x:y]
-        if y-x==1:
-            buf = buf + ' '+ ' '.join(l_word)
-        else:
-            if len(buf)>0:
-                if len(buf.strip().split())==1:
-                    yield buf
-                    buf=u''
-                else:
-                    if buf not in FREQ:
-                        print 'final cut:',buf, ''
-                        regognized = finalseg.cut(buf)
-                        for t in regognized:
-                            yield t
-                    else:
-                        for elem in buf:
-                            yield elem
-                    buf=u''
-            yield ' '.join(l_word)        
-
-        x = y
-
-    if len(buf)>0:
-        if len(buf)==1:
+def handler_buf(buf):
+    buf = buf.strip()
+    if buf:
+        if len(buf.split()) == 1:
             yield buf
         else:
-            if (buf not in FREQ):
-                print 'final cut:',buf, ''
-                regognized = finalseg.cut(buf)
-                for t in regognized:
-                    yield t
-            else:
-                for elem in buf:
-                    yield elem
+            regognized = finalseg.cut(buf)
+            for t in regognized:
+                yield t
+
+def _cut(words):
+    segment = _segment(words)
+    route = calc(words, segment)
+    aggregate = []
+    for begin, end in route.iteritems():
+        aggregate.append([begin, end[1]+1 if end[1] else begin+1])
+    t = 0
+    for i, j in aggregate:
+        if i < j-1:
+            for res in handler_buf(' '.join(words[t:i])):
+                yield res
+            yield(' '.join(words[i:j]))
+            t = j
+        elif j == len(words)-1:
+            for res in handler_buf(' '.join(words[t:])):
+                yield res
+
 
 def calc(sentence, DAG):
     route = {}
@@ -185,11 +160,11 @@ def calc(sentence, DAG):
     return route
 
 
-def cut(sentence, cut_block=__cut_DAG):
+def cut(sentence, cut_block=_cut):
     re_word, re_skip = re.compile(ur"([.*(,|\n)]+)", re.U), re.compile(ur"(\r\n|\s)", re.U)
     blocks = re_word.split(sentence)
     
-    cut_block = __cut_DAG
+    cut_block = _cut
     
     for blk in filter(lambda x: x.strip(), blocks):
         blk = blk.strip()
@@ -198,5 +173,28 @@ def cut(sentence, cut_block=__cut_DAG):
                 if word.strip():
                     yield word
         else:
-            if any(blk):
+            if blk:
                 yield blk
+
+
+def _travel_depth(words, trie):
+    if not words:
+        return 0
+    if words[0] == '':
+        return 1
+    elif words[0] in trie:
+        return 1+_travel_depth(words[1:], trie[words[0]])
+    else:
+        return 0
+
+@require_initialize()
+def _segment(words):
+    seg = defaultdict(list)
+    for no, word in enumerate(words):
+        s = _travel_depth(words[no:], TRIE)
+        if s > 0:
+            seg[no].append(s+no-1)
+        else:
+            seg[no].append(no)
+    return seg
+
