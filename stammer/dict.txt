@@ -1,4 +1,4 @@
-2-NNP-Dim Sum
+2-NNP-dim sum
 2-NP-New York
 2-NP-New Year
 2-NP-Happay

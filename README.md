@@ -1,9 +1,9 @@
 stammer
 =======
 
-an Real English stemming toolkit| pure python
+an Real English Segmentation tool| pure python
 
-the goal is to make life easier.
+the goal is to make life easier. forget about pos tags and trees and so on.
 
 ###TO DO
 
@@ -15,3 +15,8 @@ the goal is to make life easier.
 
     POS Tag is also under consideration.
 
+###Thx to jieba project
+
+    this repo take advantage from it (https://github.com/fxsjy/jieba)
+
+    and yes, it is definitly the best segmentation module in chinese!
