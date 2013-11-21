@@ -8,6 +8,7 @@ Email:  yupbank@gmail.com
 Created on
 2013-11-21
 '''
+
 import re
 from functools import wraps
 
@@ -25,6 +26,7 @@ def _cut(sentence, cut_block):
         else:
             if blk:
                 yield blk
+
 
 def require_initialize(signal, init, iargs=()):
     def _(fn):

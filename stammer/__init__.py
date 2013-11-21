@@ -8,15 +8,13 @@ Email:  yupbank@gmail.com
 Created on
 2013-11-20
 '''
-from __future__ import with_statement
+
 __version__ = '0.1'
 __license__ = 'MIT'
 
-import re
 import os
 import sys
 from math import log
-import threading
 import logging
 from collections import defaultdict
 from stammer.common import _cut, require_initialize
@@ -24,7 +22,6 @@ from hmmseg import __hmmcut
 from functools import partial
 
 DICTIONARY = "dict.txt"
-DICT_LOCK = threading.RLock()
 TRIE = None # to be initialized
 FREQ = {}
 MIN_FREQ = 0.0
@@ -37,6 +34,8 @@ log_console = logging.StreamHandler(sys.stderr)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 logger.addHandler(log_console)
+
+hmmcut = partial(_cut, cut_block=__hmmcut)
 
 
 def setLogLevel(log_level):
@@ -52,6 +51,7 @@ def build_trie(atree):
             pointer = pointer[word]
         pointer[''] = '' #end tag
     return _
+
 
 def gen_trie(f_name):
     lfreq, trie, ltotal = {}, {}, 0.0
@@ -75,14 +75,12 @@ def gen_trie(f_name):
 
 
 def initialize(*args):
-    global TRIE, FREQ, TOTAL, INITIALIZED
+    global TRIE, FREQ, TOTAL, INITIALIZED, MIN_FREQ
     _curpath = os.path.normpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
     abs_path = os.path.join(_curpath, DICTIONARY)
     TRIE, FREQ, TOTAL = gen_trie(abs_path)
     MIN_FREQ = min(FREQ.itervalues())
     INITIALIZED = True
-
-
 
 
 def _travel_depth(words, node):
@@ -107,8 +105,6 @@ def _segment(words):
             seg[no].append(no)
     return seg
 
-
-hmmcut = partial(_cut, cut_block=__hmmcut)
 
 def handler_buf(buf):
     buf = buf.strip()
@@ -149,8 +145,6 @@ def calc(sentence, DAG):
     return route
 
 
-
-
 def _travel_depth(words, node):
     if not words:
         return 0
@@ -160,7 +154,6 @@ def _travel_depth(words, node):
         return 1+_travel_depth(words[1:], node[words[0]])
     else:
         return 0
-
 
 
 def cut(sentence):
