@@ -20,7 +20,7 @@ import threading
 import logging
 from collections import defaultdict
 from stammer.common import _cut, require_initialize
-from finalseg import __hmmcut
+from hmmseg import __hmmcut
 from functools import partial
 
 DICTIONARY = "dict.txt"
