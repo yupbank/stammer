@@ -14,11 +14,13 @@ from scipy.stats import multivariate_normal
 class MultiGaussianDistribution(object):
     def __init__(self, dimensions):
         self.dimensions = dimensions
-        self.mean = np.ones([dimensions])
-        self.cov = np.ones([dimensions, dimensions])
+        self.mean = np.random.random([dimensions])-1
+        self.cov = np.random.random([dimensions, dimensions])
+        self.cov = np.dot(self.cov, self.cov.T)
         self.distri = multivariate_normal(mean=self.mean, cov=self.cov)
     
     def prob(self, observation):
+
         return self.distri.pdf(observation)
     
     def update_mean(self, mean):
@@ -33,7 +35,7 @@ class GaussianMixture(object):
     def __init__(self, component_no, states, vector_len):
         self.component_no = component_no
         self.component = range(component_no)
-        self.distributions = [[MultiGaussianDistribution(vector_len)]*component_no]*states
+        self.distribution = [[MultiGaussianDistribution(vector_len)]*component_no]*states
         self.weights = np.array([[1.0/component_no]*component_no]*states)
     
     def init_weight(self, observations):
