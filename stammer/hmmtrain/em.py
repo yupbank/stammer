@@ -1,27 +1,62 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 '''
-em.py
+__init__.py
 Author: yupbank
 Email:  yupbank@gmail.com
 
 Created on
-2014-05-29
+2014-06-04
 '''
-import copy
 import numpy as np
-from __init__ import GaussianMixture
+import numpy
+from scipy.stats import multivariate_normal
+
+class MultiGaussianDistribution(object):
+    def __init__(self, dimensions, mean=None, cov=None):
+        self.dimensions = dimensions
+        if mean is None:
+            self.mean = np.random.random([dimensions])
+        else:
+            self.mean = mean
+
+        if cov is None:
+            self.cov = np.random.random([dimensions, dimensions])
+            self.cov = np.dot(self.cov, self.cov.T)
+        else:
+            self.cov = cov
+
+        self.distri = multivariate_normal(mean=self.mean, cov=self.cov)
+    
+    def prob(self, observation):
+        return self.distri.pdf(observation)
+    
+    def update_mean(self, mean):
+        self.mean = mean
+        self.distri.mean = mean
+
+    def update_cov(self, cov):
+        self.cov = cov
+        self.distri.cov = cov
+
+
+def init_a(state_no):
+    a = np.random.random([state_no, state_no])
+    for i in xrange(state_no):
+        a[i] = a[i]/sum(a[i])
+    return a
 
 def get_key(prefix, *args, **kwargs):
-    return prefix + '-'.join(map(lambda x:str(x), args))
+    return prefix + ':' + '-'.join(map(lambda x:str(x), args))
 
 class Hmm(object):
-    def __init__(self, state_no, gm):
+    def __init__(self, state_no, distributions, sequence, pi, a):
         self.state_no = state_no
-        self.states = range(state_no)
-        self.a = np.random.random([state_no, state_no])
-        self.pi = np.array([1.0/state_no]*state_no)
-        self.gm = gm
+        self.a = a
+        self.pi = pi
+        self.distributions = distributions
+        self.observations = sequence
+        self.T = len(sequence)
         self.cache={}
 
     def do_cache(fn):
@@ -32,173 +67,153 @@ class Hmm(object):
                 inst.cache[key] = res
             return inst.cache[key]
         return _
-    #emit, b
-    @do_cache
-    def emit(self, time):
-        observation = self.observations[time]
-        prob = 0.0
-        for state in self.states:
-            for component in gm.component:
-                prob += self.gm.weights[state][component] * self.gm.distribution[state][component].prob(observation)
-        return prob
-    @do_cache
-    def emit_with_state(self, time, state):
-        observation = self.observations[time]
-        prob = 0.0
-        for component in self.gm.component:
-            prob += self.gm.weights[state][component] * self.gm.distribution[state][component].prob(observation)
-        return prob
-
-    @do_cache
-    def emit_with_condition(self, time, state, component):
-        observation = self.observations[time]
-        return self.gm.weights[state][component]*self.gm.distribution[state][component].prob(observation)
     
-    # p(o_0,...,o_t|lambda, q_t=state), forward
     @do_cache
-    def alpha(self, time, state):
-        if time == 0:
-            return self.pi[state]*self.emit_with_state(state, time)
+    def alpha(self, t, state):
+        if t == 0:
+            return self.pi[state]*self.b(state, self.observations[0])
         else:
             total = 0.0
-            for _state in self.states:
-                total += self.alpha(time-1, _state)*self.a[_state][state]
-            return total*self.emit_with_state(time, state)
-    
-    #p(o_t,...,o_T|lambda, q_t=state), backword
+            for _state in xrange(self.state_no):
+                total += self.alpha(t-1, _state)*self.a[_state][state]
+            return total*self.b(state, self.observations[t])
+
     @do_cache
-    def beta(self, time, state):
-        if time == self.T-1:
+    def beta(self, t, state):
+        if t == self.T - 1:
             return 1
         else:
             total = 0.0
-            for _state in self.states:
-                total += self.a[state][_state]*self.emit_with_state(time+1, _state)*self.beta(time+1, _state)
+            for _state in xrange(self.state_no):
+                total += self.a[state][_state]*self.b(_state, self.observations[t+1])*self.beta(t+1, _state)
             return total
 
-    #p(q_t = state|O, lambda)
     @do_cache
-    def gamma(self, time, state):
-        nor = self.alpha(time, state)*self.beta(time, state)
-        denor = 0.0
-        for _state in self.states:
-            denor += self.alpha(time, _state)*self.beta(time, _state)
-        return nor/denor
+    def b(self, state, ob):
+        return self.distributions[state].prob(ob)
+
+
     @do_cache
-    def gamma_with_component(self, time, state, component):
-        nor = self.gamma(time, state)*self.gm.weights[state][component]
-        nor *= self.emit_with_condition(time, state, component)
-        denor = self.emit_with_state(time, state)
-        return nor/denor
-
-    @do_cache 
-    def xi(self, time, state_one, state_two):
-        nor, denor = 0, 0
-        nor = self.gamma(time, state_one)*self.a[state_one][state_two]*self.emit_with_state(time+1, state_two)*self.beta(time+1, state_two)
-        denor = self.beta(time,  state_one)
-        return nor/denor
-
-    def update_pi(self, state):
-        return self.gamma(0, state)
-   
-    def update_a(self, first, second):
-        nor, denor = 0, 0
-        for time, observation in enumerate(self.observations[:-1]):
-            nor += self.xi(time, first, second)
-            denor += self.gamma(time, first)
-        return nor/denor
-   
-    def update_weight(self, state, component):
+    def gamma(self, t, state):
         nor, denor = 0.0, 0.0
-        for time, ob in enumerate(self.observations[:-1]):
-            nor += self.gamma_with_component(time, state, component)
-            denor += self.gamma(time, state)
+        nor = self.alpha(t, state)*self.beta(t, state)
+        for _state in xrange(self.state_no):
+            denor +=self.alpha(t, _state)*self.beta(t, _state)
         return nor/denor
 
-    def update_mean(self, state, component):
-        nor = np.zeros_like(self.gm.distribution[state][component].mean)
-        denor = 0.0
-        for time, ob in enumerate(self.observations):
-            nor += np.multiply(ob, self.gamma_with_component(time, state, component))
-            denor += self.gamma_with_component(time, state, component)
-        return np.multiply(nor, 1.0/denor)
+    @do_cache
+    def xi(self, t, state_one, state_two):
+        nor, denor = 0, 0
+        ob = self.observations[t+1]
+        nor = self.gamma(t, state_one)*self.a[state_one][state_two]*self.b(state_two, ob)*self.beta(t+1, state_two)
+        denor = self.beta(t, state_one)
+        return nor/denor
     
-    def update_cov(self, state, component):
-        nor = np.zeros_like(self.gm.distribution[state][component].cov)
-        denor = 0.0
-        for time, ob in enumerate(self.observations):
-            nor += np.outer(ob-self.gm.distribution[state][component].mean, ob-self.gm.distribution[state][component].mean)*self.gamma_with_component(time, state, component)
-            denor += self.gamma_with_component(time, state, component)
-        return nor/denor
+    def gamma_sum(self, state):
+        return sum([self.gamma(t, state) for t in xrange(self.T)])
 
+    def gamma_observation_sum(self, state):
+        return sum([numpy.multiply(self.observations[t], self.gamma(t, state)) for t in xrange(self.T)])
+    
+    def gamma_component_cov_sum(self, state):
+        cov = lambda t:numpy.outer(self.observations[t]-self.distributions[state].mean, self.observations[t]-self.distributions[state].mean)
+        return sum([numpy.multiply(cov(t), self.gamma(t, state)) for t in xrange(self.T)])
+    
+    def xi_sum(self, state_one, state_two):
+        return sum([self.xi(t, state_one, state_two) for t in xrange(self.T-1)])
+    
+    def predict(self):
+        res = 0.0
+        for _state in xrange(self.state_no):
+            res += self.alpha(self.T-1, _state)
+        return res
 
-    def run(self, run_num, observations):
-        self.T = len(observations) 
-        self.observations = observations
-        for run in range(run_num):
-            self.cache={}
-            print 'step', run
-            new_pi = copy.copy(self.pi)
-            new_a = copy.copy(self.a)
-            new_mean = []
+class Trainner(object):
+    def __init__(self, state_no, sequences, distributions):
+        self.a = init_a(state_no)
+        self.state_no = state_no
+        self.pi = np.array([1.0/state_no for i in range(state_no)])
+        self.sequences = sequences
+        self.E = len(sequences)
+        self.hmms = []
+        self.distributions = distributions
+        for sequence in sequences:
+            self.hmms.append(Hmm(state_no, distributions, sequence, self.pi, self.a))
+    
+    def update(self):
+        for i in xrange(self.state_no):
+            print self.new_mean[i], '-----'
+            self.distributions[i].update_mean(self.new_mean[i])
+            self.distributions[i].update_cov(self.new_cov[i])
+
+        for n, sequence in enumerate(self.sequences):
+            self.hmms[n] = Hmm(self.state_no, distributions, sequence, self.new_pi, self.new_a)
+
+    def fit(self, num=100):
+        for step in xrange(num):
+            new_pi = []
             new_cov = []
-            new_weight = []
-            for state in  self.states:
-                new_pi[state] = self.update_pi(state)
-                for second_state in self.states:
-                    new_a[state][second_state] = self.update_a(state, second_state)
-                _mean, _cov, _weight = [], [], []
-                for component in self.gm.component:
-                    mean = self.update_mean(state, component)
-                    cov = self.update_cov(state, component)
-                    weight = self.update_weight(state, component)
-                    _weight.append(weight)
-                    _mean.append(mean)
-                    _cov.append(cov)
+            new_a = []
+            new_mean = []
+            for state in xrange(self.state_no):
+                _weights = []
+                _mean = []
+                _cov = []
+                _a = []
+                _pi = 0.0
+                print '------------'
+                for hmm in self.hmms:
+                    print hmm.predict(), '!!'
+                    _pi += hmm.gamma(0, state)
+                    gamma_denor += hmm.gamma_sum(state)
+                    gamma_observation_sum += hmm.gamma_observation_sum(state)
+                    gamma_component_cov_sum = +hmm.gamma_component_cov_sum(state)
+                _mean += numpy.multiply(gamma_observation_sum, 1/gamma_denor))
+                _cov.append(numpy.multiply(gamma_component_cov_sum, 1/gamma_denor))
+                for _state in xrange(self.state_no):
+                    xi_sum = hmm.xi_sum(state, _state)
+                    _a.append(xi_sum/gamma_denor)
+                new_pi.append(_pi/self.E)
                 new_mean.append(_mean)
                 new_cov.append(_cov)
-                new_weight.append(_weight)
-            self.pi = new_pi
-            self.a = new_a
-            for state in self.states:
-                for component in self.gm.component:
-                    self.gm.weights[state][component]=new_weight[state][component]
-                    self.gm.distribution[state][component].update_mean(new_mean[state][component])
-                    self.gm.distribution[state][component].update_cov(new_cov[state][component])
+                new_a.append(_a)
+            self.new_a = new_a
+            self.new_pi = new_pi
+            self.new_mean = new_mean
+            self.new_cov = new_cov
+            self.update()
 
+    def predict(self, ob):
+        distributions = []
+        for i in xrange(self.state_no):
+            distributions[i].update_mean(self.new_mean[i])
+            distributions[i].update_cov(self.new_cov[i])
+
+            hmm = Hmm(self.state_no, distributions, ob, self.new_pi, self.new_a, self.component_no)
+        return hmm.predict()
             
-def predict(hmm, observations):
-    hmm.observations = observations
-    res = 0
-    for state in hmm.states:
-        res += hmm.alpha(len(observations)-1, state)
-    return res
-
-def change_obs(obs):
-    mean = np.zeros(len(obs[0]))
-    for ob in obs:
-        mean += ob
-    mean = mean/len(obs)
-    res = []
-    for ob in obs:
-        res.append(ob-mean) 
-    return res
-
-def main():
+                
+                
+if __name__ == "__main__":
     observation_one = [[1, 2, 3], [1, 2, 4], [1, 3, 4], [2, 4, 5], [3, 2, 5]]
-    observation_two = [[2, 2, 3], [1, 2, 4], [1, 3, 4], [2, 4, 5], [3, 2, 5]]
-    change_obs(observation_one) 
-    gm_one = GaussianMixture(component_no=1, states=4, vector_len=3)
-    hmm_one = Hmm(1, gm_one)
-    gm_two = GaussianMixture(component_no=1, states=4, vector_len=3)
-    hmm_two = Hmm(1, gm_two)
-    hmm_one.run(112, change_obs(observation_one))
-    hmm_two.run(112, change_obs(observation_two))
-    print hmm_one.gm.distribution[0][0].mean
-    print predict(hmm_one, change_obs(observation_one))
-    print predict(hmm_one, change_obs(observation_two))
-    print predict(hmm_two, change_obs(observation_one))
-    print predict(hmm_two, change_obs(observation_two))
+    observation_two = [[2, 2, 3], [3, 2, 4], [1, 3, 4], [2, 4, 5], [3, 2, 5]]
+    a = []
+    a.extend(observation_one)
+    a.extend(observation_two)
+    a = map(lambda x: numpy.array(x), a)
+    mean = numpy.multiply(sum(a), 1.0/len(a))
+    cov = np.random.random([3, 3])
+    cov = np.dot(cov, cov.T)
 
-if __name__ == '__main__':
-    main()
+    obs = [observation_one, observation_two]
+    state_no = 2
+    #distri = multivariate_normal(mean=mean, cov=cov)
+    distributions=[MultiGaussianDistribution(3, mean=mean, cov=cov) for i in xrange(state_no)]
+    train = Trainner(state_no, obs, distributions)
+    train.fit(10)
+    print train.predict(obs[0])
+
+
+
+
+
